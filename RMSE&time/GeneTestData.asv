@@ -1,0 +1,93 @@
+% Generate the test data for different imaging algorithms
+% Author：Gao Jingkun  Date：2017.12.19
+clear;
+%% parameters
+e0=8.85e-12;u0=4*pi*1e-7;
+c=1/sqrt(e0*u0);                             % speed of light
+N_pulse=1024*32;
+N_fs=4096; 
+fs=10e6;
+T=500e-6;
+Tp=400e-6;
+f_start=13449*1e6;
+f_end=14250*1e6;
+B=(f_end-f_start)*16;                        % bandwidth
+N_f=fs*Tp;
+f=linspace(f_start*16,f_end*16,N_f);
+index_f_used=1:8:4000;
+f=f(index_f_used);f=f(:);
+N_f=length(f);
+rotatespeed=90/4; 
+fai=linspace(0,rotatespeed*T*(N_pulse-1),N_pulse);
+angle_range=360; 
+N_fai=floor(angle_range/fai(end)*N_pulse);
+fai=fai(1:N_fai);fai=fai(:);
+d_f=f(2)-f(1);                               % 频点间隔
+d_fai=fai(2)-fai(1);                         % 方位角间隔
+range_r=c/2/d_f;                             % 距离向不混叠范围
+range_a=c/mean(f)/2/deg2rad(d_fai);          % 方位向不混叠范围
+d_x_Ima=0.003;                               % 图像中x轴（距离向）像素点间隔
+d_y_Ima=d_x_Ima;                             % 图像中y轴（方位向）像素点间隔
+Nfft_r=round(range_r/d_x_Ima);               % 距离向进行FFT的点数
+Nfft_a=round(range_a/d_y_Ima);               % 方位向进行FFT的点数
+
+N_x=280;                                     % 图像中x轴（距离向）像素点数  训练数据该值小于实际成像有利于训练
+N_y=280;                                     % 图像中y轴（方位向）像素点数
+x=linspace(0,d_x_Ima*N_x,N_x+1);x=x(:);
+x=[x(ceil(N_x/2+0.5)+mod(N_x,2):end-1)-x(end);x(1:ceil(N_x/2))];
+y=linspace(0,d_y_Ima*N_y,N_y+1);y=y(:);
+y=[y(ceil(N_y/2+0.5)+mod(N_y,2):end-1)-y(end);y(1:ceil(N_y/2))];
+[X,Y]=ndgrid(x,y);
+
+%% load or 生成回波数据
+N_fai=300;
+fai=linspace(0,d_fai*N_fai,N_fai+1);fai=fai(:);
+fai=[fai(ceil(N_fai/2+0.5)+mod(N_fai,2):end-1)-fai(end);fai(1:ceil(N_fai/2))];
+N_t_max=200;
+k_tensor=2*pi*f/c*ones(1,N_fai);
+fai_tensor=ones(N_f,1)*fai';
+N_sample=100;
+Input=zeros(N_x,N_y,N_sample);
+Output=Input;
+Sig=zeros(N_f,N_fai,N_sample);
+% I=eye(2);
+% N_FFT=[Nfft_r,Nfft_a];
+% N_sig=[N_f,N_fai];
+parfor c_sample=1:N_sample
+    N_t = randi(N_t_max,1);
+    coord_x=0.5*(rand(N_t,1)-0.5);
+    coord_y=0.5*(rand(N_t,1)-0.5);
+    
+    amp_t=randn(N_t,1)+1j*randn(N_t,1);
+    sig=zeros(N_f,N_fai);
+    for c_t=1:N_t
+        R_T=coord_x(c_t).*cosd(fai_tensor)+coord_y(c_t).*sind(fai_tensor);
+        sig=sig+amp_t(c_t)*exp(-2j.*k_tensor.*R_T);
+        % 生成 Groundtruth
+        Output(:,:,c_sample)=Output(:,:,c_sample)+abs(amp_t(c_t))*exp(-(X-coord_x(c_t)).^2/0.004^2-(Y-coord_y(c_t)).^2/0.004^2);
+    end
+%     figure;imagesc(y,x,Output(:,:,c_sample));axis image;
+    Sig(:,:,c_sample)=sig;
+    %% 成像
+
+    N_pad_pre=ceil((Nfft_r-N_f)/2);
+    N_pad_post=Nfft_r-N_f-N_pad_pre;
+    sig=padarray(sig,[N_pad_pre 0],0,'pre');
+    sig=padarray(sig,[N_pad_post 0],0,'post');
+    sig=ifft(ifftshift(sig,1),[],1);
+    sig=[sig(end-N_x+ceil(N_x/2)+1:end,:);sig(1:ceil(N_x/2),:)];
+    N_pad_pre=ceil((Nfft_a-N_fai)/2);
+    N_pad_post=Nfft_a-N_fai-N_pad_pre;
+    sig=padarray(sig,[0 N_pad_pre],0,'pre');
+    sig=padarray(sig,[0 N_pad_post],0,'post');
+    sig=ifft(ifftshift(sig,2),[],2);
+    sig=[sig(:,end-N_y+ceil(N_y/2)+1:end) sig(:,1:ceil(N_y/2))];
+    Input(:,:,c_sample)=sig;
+%     figure;imagesc(y,x,abs(Sig));axis image;
+end
+Input=single(Input);
+Output=single(Output);
+
+save Input Input;
+save Output Output;
+save Sig Sig;
